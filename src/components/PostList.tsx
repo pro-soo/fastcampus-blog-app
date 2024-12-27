@@ -1,38 +1,120 @@
+import AuthContext from "context/AuthContext";
+import { collection, deleteDoc, doc, getDocs, orderBy, query, where } from "firebase/firestore";
+import { db } from "firebaseApp";
+import {useContext, useEffect, useState} from "react";
 import { Link } from "react-router-dom";
+import { toast } from "react-toastify";
 
 interface PostListProps {
     hasNavigation? : boolean;
+    defaultTab?: TabType | CategoryType;
 }
 
-export default function PostList({hasNavigation = true}:PostListProps){
+type TabType = "all" | "my";
+
+export interface CommentsInterface {
+    content: string;
+    uid: string;
+    email: string;
+    createdAt: string;
+}
+
+export interface PostProps {
+    id?: string;
+    title: string;
+    email: string;
+    summary: string;
+    content: string;
+    createdAt: string;
+    updatedAt: string;
+    uid: string;
+    category?: CategoryType;
+    comments?: CommentsInterface[];
+}
+
+
+export type CategoryType = "Frontend" | "Backend" | "Web" | "Native" ;
+export const CATEGORIES: CategoryType[] = ["Frontend", "Backend", "Web", "Native"];
+
+export default function PostList({hasNavigation = true, defaultTab='all'}:PostListProps){
+    const [activeTab, setActiveTeb] = useState<TabType | CategoryType>(defaultTab);
+    const [posts, setPosts] = useState<PostProps[]>([]);
+    const {user} = useContext(AuthContext);
+
+    const getPosts = async () => {
+        
+        setPosts([]);   // 초기화
+        let postsRef = collection(db, "posts");
+        let postsQuery;
+
+        if(activeTab === 'my' && user){
+            // 나의 글만 필터링
+            postsQuery = query(postsRef, where('uid', '==', user.uid), orderBy("createdAt", "asc"));
+        } else if (activeTab === 'all') {
+            // 모든 글 보여주기
+            postsQuery = query(postsRef, orderBy("createdAt", "asc"));
+        } else {
+            // 카테고리 글 보여주기
+            postsQuery = query(postsRef, where('category', '==', activeTab), orderBy("createdAt", "asc"));
+        }
+        const datas = await getDocs(postsQuery);
+        datas?.forEach((doc)=>{
+            const dataObj = {...doc.data(), id: doc.id};
+            setPosts((prev) => [...prev, dataObj as PostProps]);
+        });
+    };
+
+    const handleDelete = async (id:string) => {
+        const confirm = window.confirm("해당 게시글을 삭제하시겠습니까?");
+        if(confirm && id){
+            await deleteDoc(doc(db, "posts", id));
+
+            toast.success("게시글을 삭제했습니다.");
+            getPosts(); // 변경된 post 리스트 다시 가져오기
+        }
+    };
+
+    useEffect(()=>{
+        getPosts();
+    }, [activeTab]);
     return (
         <>
         {hasNavigation && (
         <div className="post__navigation">
-            <div className="post__navigation--active">전체</div>
-            <div>나의 글</div>
+            <div role="presentation" onClick={() => setActiveTeb('all')} 
+            className={activeTab === 'all' ? 'post__navigation--active' : ""}>전체</div>
+            <div role="presentation" onClick={() => setActiveTeb('my')}
+            className={activeTab === 'my' ? 'post__navigation--active' : ""}>나의 글</div>
+            {CATEGORIES?.map((category)=>(
+                <div key={category} role="presentation" onClick={() => setActiveTeb(category)}
+                className={activeTab === category ? 'post__navigation--active' : ""}>{category}</div>
+            ))}
         </div>
         )}
         <div className="post__list">
-                {[...Array(10)].map((e, index) => (
-                    <div key={index} className="post__box">
-                        <Link to={`/posts/${index}`}>
+                {posts?.length > 0 ? posts?.map((post, index) => (
+                    <div key={post?.id} className="post__box">
+                        <Link to={`/posts/${post?.id}`}>
                             <div className="post__profile-box">
                                 <div className="post__profile" />
-                                <div className="post__author-name">패스트캠퍼스</div>
-                                <div className="post__date">2024.12.18 수요일</div>
+                                <div className="post__author-name">{post?.email}</div>
+                                <div className="post__date">{post?.createdAt}</div>
                             </div>
-                            <div className="post__title">게시글 {index}</div>
+                            <div className="post__title">{post?.title}</div>
                             <div className="post__text">
-                                Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum
-                            </div>
-                            <div className="post__utils-box">
-                                <div className="post__delete">삭제</div>
-                                <div className="post__edit">수정</div>
+                                {post?.summary}
                             </div>
                         </Link>
+                            {post?.email === user?.email && (
+                                <div className="post__utils-box">
+                                <div className="post__delete" role="presentation" onClick={()=> handleDelete(post.id as string)}>삭제</div>
+                                <div className="post__edit">
+                                    <Link to={`/posts/edit/${post?.id}`}>수정</Link>
+                                </div>
+                                </div>
+                            )}
                     </div>
-                ))}
+                )) : <div className="post__no-post">게시글이 없습니다.</div>}
             </div>
         </>
     );
